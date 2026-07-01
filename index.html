@@ -435,7 +435,7 @@
 
             async syncToCloud(dateStr) {
                 if (!this.user) return;
-                const localEvents = LocalCache.get(dateStr);
+                let localEvents = LocalCache.get(dateStr);
 
                 const { data: cloudEvents } = await sbClient
                     .from('events')
@@ -453,7 +453,8 @@
                     }
                 }
 
-                // 插入或更新本地的事件
+                // 插入或更新本地的事件，并更新ID
+                const updatedEvents = [];
                 for (const event of localEvents) {
                     const eventData = {
                         user_id: this.user.id,
@@ -465,18 +466,24 @@
                     };
 
                     if (String(event.id).startsWith('local_')) {
+                        // 新事件，插入云端并获取真实ID
                         const { data } = await sbClient.from('events').insert(eventData).select();
                         if (data && data[0]) {
-                            event.id = data[0].id;
+                            updatedEvents.push({ ...event, id: data[0].id });
+                        } else {
+                            updatedEvents.push(event);
                         }
                     } else if (!cloudIds.has(event.id)) {
                         await sbClient.from('events').insert(eventData);
+                        updatedEvents.push(event);
                     } else {
                         await sbClient.from('events').update(eventData).eq('id', event.id);
+                        updatedEvents.push(event);
                     }
                 }
 
-                await this.syncFromCloud();
+                // 更新本地缓存中的ID
+                LocalCache.set(dateStr, updatedEvents);
             }
         }
 
