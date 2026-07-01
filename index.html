@@ -85,12 +85,36 @@
                 </div>
             </div>
 
-            <!-- 用户状态 -->
-            <div id="userStatus" class="flex items-center gap-3">
-                <span class="text-slate-400 text-sm">未登录</span>
-                <button onclick="authManager.showLoginModal()" class="glass px-4 py-2 rounded-xl hover:bg-white/10 transition text-sm font-medium">
-                    登录 / 注册
+            <div class="flex items-center gap-3 flex-wrap justify-center">
+                <button onclick="calendar.today()" class="glass px-4 py-2 rounded-xl hover:bg-white/10 transition text-sm font-medium">
+                    今天
                 </button>
+                <div class="flex items-center gap-1 glass rounded-xl p-1">
+                    <button onclick="calendar.prevMonth()" class="p-2 hover:bg-white/10 rounded-lg transition">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                    </button>
+                    <span id="monthYear" class="px-4 font-semibold text-lg min-w-[140px] text-center"></span>
+                    <button onclick="calendar.nextMonth()" class="p-2 hover:bg-white/10 rounded-lg transition">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    </button>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="dataManager.exportData()" class="glass px-3 py-2 rounded-xl hover:bg-white/10 transition text-sm font-medium flex items-center gap-1">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                        导出
+                    </button>
+                    <label class="glass px-3 py-2 rounded-xl hover:bg-white/10 transition text-sm font-medium flex items-center gap-1 cursor-pointer">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                        导入
+                        <input type="file" accept=".json" onchange="dataManager.importData(this)" class="hidden">
+                    </label>
+                </div>
+                <div id="userStatus" class="flex items-center gap-3">
+                    <span class="text-slate-400 text-sm">未登录</span>
+                    <button onclick="authManager.showLoginModal()" class="glass px-4 py-2 rounded-xl hover:bg-white/10 transition text-sm font-medium">
+                        登录 / 注册
+                    </button>
+                </div>
             </div>
         </header>
 
@@ -98,17 +122,6 @@
             <!-- 日历主体 -->
             <div class="lg:col-span-2">
                 <div class="glass-strong rounded-3xl p-6 shadow-2xl">
-                    <!-- 月份导航 -->
-                    <div class="flex items-center justify-between mb-6">
-                        <button onclick="calendar.prevMonth()" class="p-2 hover:bg-white/10 rounded-lg transition">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
-                        </button>
-                        <span id="monthYear" class="px-4 font-semibold text-lg"></span>
-                        <button onclick="calendar.nextMonth()" class="p-2 hover:bg-white/10 rounded-lg transition">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                        </button>
-                    </div>
-
                     <!-- 星期标题 -->
                     <div class="grid grid-cols-7 gap-2 mb-4">
                         <div class="text-center text-sm font-medium text-red-400 py-2">日</div>
@@ -258,11 +271,42 @@
 
     <script>
         // ==================== Supabase 配置 ====================
-        // 【重要】替换为你自己的 Supabase 项目 URL 和 anon key
         const SB_URL = 'https://tdfrokzslxwbtgmofrng.supabase.co';
         const SB_KEY = 'sb_publishable_YVsD-A8R03beSgE5PXdDbg_csZb6-hR';
-
         const sbClient = window.supabase.createClient(SB_URL, SB_KEY);
+
+        // ==================== 本地缓存管理 ====================
+        class LocalCache {
+            static getKey() {
+                const userId = authManager.user?.id || 'guest';
+                return `calendar_events_${userId}`;
+            }
+
+            static getAll() {
+                try {
+                    return JSON.parse(localStorage.getItem(this.getKey()) || '{}');
+                } catch { return {}; }
+            }
+
+            static get(dateStr) {
+                return this.getAll()[dateStr] || [];
+            }
+
+            static set(dateStr, events) {
+                const all = this.getAll();
+                if (events.length === 0) delete all[dateStr];
+                else all[dateStr] = events;
+                localStorage.setItem(this.getKey(), JSON.stringify(all));
+            }
+
+            static setAll(events) {
+                localStorage.setItem(this.getKey(), JSON.stringify(events));
+            }
+
+            static clear() {
+                localStorage.removeItem(this.getKey());
+            }
+        }
 
         // ==================== 认证管理 ====================
         class AuthManager {
@@ -276,16 +320,30 @@
                 if (session) {
                     this.user = session.user;
                     this.updateUI();
+                    await this.syncFromCloud();
                 }
 
-                sbClient.auth.onAuthStateChange((event, session) => {
+                sbClient.auth.onAuthStateChange(async (event, session) => {
+                    const hadUser = !!this.user;
                     this.user = session?.user || null;
                     this.updateUI();
+
                     if (this.user) {
+                        if (!hadUser) await this.syncFromCloud();
                         calendar.render();
                         if (calendar.selectedDate) {
                             eventManager.loadEventsForDate(calendar.selectedDate);
                         }
+                    } else {
+                        LocalCache.clear();
+                        calendar.render();
+                        document.getElementById('eventsList').innerHTML = `
+                            <div class="text-center text-slate-500 py-12 slide-in">
+                                <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                </svg>
+                                <p>请先登录查看事件</p>
+                            </div>`;
                     }
                 });
             }
@@ -353,12 +411,72 @@
 
             async logout() {
                 await sbClient.auth.signOut();
-                calendar.render();
-                document.getElementById('eventsList').innerHTML = `
-                    <div class="text-center text-slate-500 py-12">
-                        <p>请先登录查看事件</p>
-                    </div>
-                `;
+            }
+
+            async syncFromCloud() {
+                if (!this.user) return;
+                const { data } = await sbClient
+                    .from('events')
+                    .select('*')
+                    .eq('user_id', this.user.id);
+
+                const events = {};
+                (data || []).forEach(e => {
+                    if (!events[e.date]) events[e.date] = [];
+                    events[e.date].push(e);
+                });
+
+                Object.keys(events).forEach(date => {
+                    events[date].sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
+                });
+
+                LocalCache.setAll(events);
+            }
+
+            async syncToCloud(dateStr) {
+                if (!this.user) return;
+                const localEvents = LocalCache.get(dateStr);
+
+                const { data: cloudEvents } = await sbClient
+                    .from('events')
+                    .select('*')
+                    .eq('user_id', this.user.id)
+                    .eq('date', dateStr);
+
+                const cloudIds = new Set((cloudEvents || []).map(e => e.id));
+                const localIds = new Set(localEvents.map(e => e.id).filter(id => id && !String(id).startsWith('local_')));
+
+                // 删除云端有但本地没有的
+                for (const cloudEvent of (cloudEvents || [])) {
+                    if (!localIds.has(cloudEvent.id)) {
+                        await sbClient.from('events').delete().eq('id', cloudEvent.id);
+                    }
+                }
+
+                // 插入或更新本地的事件
+                for (const event of localEvents) {
+                    const eventData = {
+                        user_id: this.user.id,
+                        date: dateStr,
+                        title: event.title,
+                        time: event.time,
+                        desc: event.desc,
+                        color: event.color
+                    };
+
+                    if (String(event.id).startsWith('local_')) {
+                        const { data } = await sbClient.from('events').insert(eventData).select();
+                        if (data && data[0]) {
+                            event.id = data[0].id;
+                        }
+                    } else if (!cloudIds.has(event.id)) {
+                        await sbClient.from('events').insert(eventData);
+                    } else {
+                        await sbClient.from('events').update(eventData).eq('id', event.id);
+                    }
+                }
+
+                await this.syncFromCloud();
             }
         }
 
@@ -401,14 +519,8 @@
                 return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
             }
 
-            async getEventsForDate(dateStr) {
-                if (!authManager.user) return [];
-                const { data } = await sbClient
-                    .from('events')
-                    .select('*')
-                    .eq('user_id', authManager.user.id)
-                    .eq('date', dateStr);
-                return data || [];
+            getEventsForDate(dateStr) {
+                return LocalCache.get(dateStr);
             }
 
             async render() {
@@ -427,22 +539,14 @@
                     grid.appendChild(this.createDayCell(daysInPrevMonth-i, true));
                 }
 
+                const allEvents = LocalCache.getAll();
                 const eventsMap = new Map();
-                if (authManager.user) {
-                    const startDate = this.formatDate(new Date(year, month, 1));
-                    const endDate = this.formatDate(new Date(year, month+1, 0));
-                    const { data } = await sbClient
-                        .from('events')
-                        .select('date, color')
-                        .eq('user_id', authManager.user.id)
-                        .gte('date', startDate)
-                        .lte('date', endDate);
-
-                    (data || []).forEach(e => {
-                        if (!eventsMap.has(e.date)) eventsMap.set(e.date, new Set());
-                        eventsMap.get(e.date).add(e.color);
+                Object.entries(allEvents).forEach(([date, events]) => {
+                    events.forEach(e => {
+                        if (!eventsMap.has(date)) eventsMap.set(date, new Set());
+                        eventsMap.get(date).add(e.color);
                     });
-                }
+                });
 
                 for (let day = 1; day <= daysInMonth; day++) {
                     const dateStr = this.formatDate(new Date(year, month, day));
@@ -492,28 +596,25 @@
                 return cell;
             }
 
-            async updateStats() {
-                if (!authManager.user) {
-                    document.getElementById('statTotalEvents').textContent = '0';
-                    document.getElementById('statTodayEvents').textContent = '0';
-                    document.getElementById('statUpcoming').textContent = '0';
-                    return;
-                }
+            updateStats() {
+                const allEvents = LocalCache.getAll();
                 const currentMonth = this.currentDate.getMonth();
                 const currentYear = this.currentDate.getFullYear();
                 const todayStr = this.formatDate(this.today);
 
-                const { data } = await sbClient
-                    .from('events')
-                    .select('date')
-                    .eq('user_id', authManager.user.id);
-
                 let monthEvents = 0, todayEvents = 0, upcoming = 0;
-                (data || []).forEach(e => {
-                    const d = new Date(e.date);
-                    if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) monthEvents++;
-                    if (e.date === todayStr) todayEvents++;
-                    if (e.date >= todayStr) upcoming++;
+
+                Object.entries(allEvents).forEach(([date, eventList]) => {
+                    const d = new Date(date);
+                    if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+                        monthEvents += eventList.length;
+                    }
+                    if (date === todayStr) {
+                        todayEvents += eventList.length;
+                    }
+                    if (date >= todayStr) {
+                        upcoming += eventList.length;
+                    }
                 });
 
                 document.getElementById('statTotalEvents').textContent = monthEvents;
@@ -530,25 +631,29 @@
                 this.currentDate = null;
             }
 
-            async loadEventsForDate(dateStr) {
+            loadEventsForDate(dateStr) {
                 this.currentDate = dateStr;
                 const date = new Date(dateStr);
                 document.getElementById('selectedDateTitle').textContent = date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' });
                 document.getElementById('selectedDateSubtitle').textContent = dateStr;
 
                 const list = document.getElementById('eventsList');
+                const addBtn = document.getElementById('addEventBtn');
 
                 if (!authManager.user) {
-                    list.innerHTML = '<div class="text-center text-slate-500 py-12"><p>请先登录</p></div>';
+                    list.innerHTML = `
+                        <div class="text-center text-slate-500 py-12 slide-in">
+                            <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                            </svg>
+                            <p>请先登录查看事件</p>
+                        </div>`;
+                    addBtn.disabled = true;
                     return;
                 }
 
-                const { data: events } = await sbClient
-                    .from('events')
-                    .select('*')
-                    .eq('user_id', authManager.user.id)
-                    .eq('date', dateStr)
-                    .order('time');
+                addBtn.disabled = false;
+                const events = LocalCache.get(dateStr);
 
                 if (!events || events.length === 0) {
                     list.innerHTML = `
@@ -561,7 +666,9 @@
                         </div>`;
                 } else {
                     list.innerHTML = '';
-                    events.forEach((event, index) => {
+                    const sortedEvents = [...events].sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
+
+                    sortedEvents.forEach((event, index) => {
                         const colorMap = {
                             'indigo': 'border-l-indigo-500 bg-indigo-500/10',
                             'red': 'border-l-red-500 bg-red-500/10',
@@ -624,7 +731,11 @@
                 setTimeout(() => document.getElementById('eventTitle').focus(), 100);
             }
 
-            closeModal() { document.getElementById('eventModal').classList.add('hidden'); this.currentEditingId = null; }
+            closeModal() {
+                document.getElementById('eventModal').classList.add('hidden');
+                this.currentEditingId = null;
+            }
+
             selectColor(color) {
                 this.selectedColor = color;
                 document.querySelectorAll('.color-option').forEach(btn => {
@@ -632,33 +743,44 @@
                     if (btn.dataset.color === color) btn.classList.add('selected');
                 });
             }
+
             editEvent(event) { this.openModal(event); }
 
             async saveEvent(e) {
                 e.preventDefault();
-                if (!authManager.user) return;
+                if (!authManager.user || !this.currentDate) return;
 
                 const title = document.getElementById('eventTitle').value.trim();
                 const time = document.getElementById('eventTime').value;
                 const desc = document.getElementById('eventDesc').value.trim();
                 if (!title) return;
 
-                const eventData = {
-                    user_id: authManager.user.id,
-                    date: this.currentDate,
-                    title,
-                    time,
-                    desc,
-                    color: this.selectedColor
-                };
+                let events = LocalCache.get(this.currentDate);
 
                 if (this.currentEditingId) {
-                    await sbClient.from('events').update(eventData).eq('id', this.currentEditingId);
+                    const index = events.findIndex(e => e.id === this.currentEditingId);
+                    if (index !== -1) {
+                        events[index] = {
+                            id: this.currentEditingId,
+                            title, time, desc,
+                            color: this.selectedColor
+                        };
+                    }
                 } else {
-                    await sbClient.from('events').insert(eventData);
+                    events.push({
+                        id: 'local_' + Date.now(),
+                        title, time, desc,
+                        color: this.selectedColor
+                    });
                 }
 
+                LocalCache.set(this.currentDate, events);
                 this.closeModal();
+                this.loadEventsForDate(this.currentDate);
+                calendar.render();
+
+                // 后台同步到云端
+                await authManager.syncToCloud(this.currentDate);
                 this.loadEventsForDate(this.currentDate);
                 calendar.render();
             }
@@ -667,10 +789,67 @@
                 if (!this.currentEditingId || !this.currentDate) return;
                 if (!confirm('确定要删除这个事件吗？')) return;
 
-                await sbClient.from('events').delete().eq('id', this.currentEditingId);
+                let events = LocalCache.get(this.currentDate);
+                events = events.filter(e => e.id !== this.currentEditingId);
+                LocalCache.set(this.currentDate, events);
+
                 this.closeModal();
                 this.loadEventsForDate(this.currentDate);
                 calendar.render();
+
+                // 后台同步到云端
+                await authManager.syncToCloud(this.currentDate);
+            }
+        }
+
+        // ==================== 数据管理（导出/导入）====================
+        class DataManager {
+            exportData() {
+                const data = JSON.stringify(LocalCache.getAll(), null, 2);
+                const blob = new Blob([data], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `calendar_backup_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
+
+            async importData(input) {
+                const file = input.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        if (typeof data !== 'object') throw new Error('格式错误');
+
+                        if (!authManager.user) {
+                            alert('请先登录再导入数据');
+                            return;
+                        }
+
+                        LocalCache.setAll(data);
+                        calendar.render();
+                        if (calendar.selectedDate) {
+                            eventManager.loadEventsForDate(calendar.selectedDate);
+                        }
+
+                        // 同步所有日期到云端
+                        for (const dateStr of Object.keys(data)) {
+                            await authManager.syncToCloud(dateStr);
+                        }
+
+                        alert('数据导入成功！');
+                    } catch (err) {
+                        alert('无法解析文件：' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+                input.value = '';
             }
         }
 
@@ -678,6 +857,7 @@
         const authManager = new AuthManager();
         const calendar = new Calendar();
         const eventManager = new EventManager();
+        const dataManager = new DataManager();
 
         calendar.init();
 

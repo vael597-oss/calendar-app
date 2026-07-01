@@ -1,6 +1,14 @@
 # Calendar App
 
-基于 Supabase + Vercel 的交互式日历，支持多用户隔离、事件增删改查。
+**当前版本：v1.1.0 | 更新日期：2026-07-01**
+
+---
+
+**v1.1.0 核心升级**：添加本地缓存层（点日期秒开侧边栏）、数据导出/导入（JSON 备份）、键盘快捷键（← → 翻月，ESC 关闭弹窗）、"今天"快速跳转按钮。
+
+**v1.0.0 核心功能**：基于 Supabase + Vercel 的交互式日历，支持多用户隔离、事件增删改查。
+
+---
 
 ## 在线访问
 
@@ -19,6 +27,9 @@ https://calendar-app-czl6.vercel.app
 - [x] 按月视图浏览
 - [x] 用户数据隔离（RLS 行级安全）
 - [x] 响应式布局
+- [x] 本地缓存加速（点日期秒开侧边栏）
+- [x] 数据导出 / 导入（JSON 备份）
+- [x] 键盘快捷键（← → 翻月，ESC 关闭弹窗）
 
 ## 本地开发
 
@@ -32,7 +43,60 @@ git clone https://github.com/vael597-oss/calendar-app.git
 # 3. 本地启动
 python -m http.server 8080
 # 访问 http://localhost:8080
-```
+ 明白了，你想要类似 STM32 项目那种格式：**版本号和日期写在最开头**，而不是放在底部的 Changelog 里。
+
+而且 v1.0.0 的 tag 已经打好了，现在更新到 v1.1.0，需要在 README 里体现这个演进。
+
+---
+
+## 修正后的 README.md
+
+```markdown
+# Calendar App
+
+**当前版本：v1.1.0 | 更新日期：2026-07-01**
+
+---
+
+**v1.1.0 核心升级**：添加本地缓存层（点日期秒开侧边栏）、数据导出/导入（JSON 备份）、键盘快捷键（← → 翻月，ESC 关闭弹窗）、"今天"快速跳转按钮。
+
+**v1.0.0 核心功能**：基于 Supabase + Vercel 的交互式日历，支持多用户隔离、事件增删改查。
+
+---
+
+## 在线访问
+
+https://calendar-app-czl6.vercel.app
+
+## 技术栈
+
+- 前端：HTML + Tailwind CSS + Vanilla JS
+- 后端：Supabase (PostgreSQL + Auth)
+- 部署：GitHub + Vercel 自动部署
+
+## 功能
+
+- [x] 邮箱登录 / 自动注册
+- [x] 事件增删改查（标题、时间、颜色标签、描述）
+- [x] 按月视图浏览
+- [x] 用户数据隔离（RLS 行级安全）
+- [x] 响应式布局
+- [x] 本地缓存加速（点日期秒开侧边栏）
+- [x] 数据导出 / 导入（JSON 备份）
+- [x] 键盘快捷键（← → 翻月，ESC 关闭弹窗）
+
+## 本地开发
+
+```bash
+# 1. 克隆
+git clone https://github.com/vael597-oss/calendar-app.git
+
+# 2. 替换 Supabase 配置
+# 编辑 index.html 里的 SB_URL 和 SB_KEY
+
+# 3. 本地启动
+python -m http.server 8080
+# 访问 http://localhost:8080
 
 ## 数据库结构
 
