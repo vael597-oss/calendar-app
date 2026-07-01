@@ -420,17 +420,25 @@
                     .select('*')
                     .eq('user_id', this.user.id);
 
-                const events = {};
+                // 获取本地现有数据
+                const localEvents = LocalCache.getAll();
+
+                // 合并云端数据到本地（云端优先，但保留本地独有的）
+                const mergedEvents = { ...localEvents };
                 (data || []).forEach(e => {
-                    if (!events[e.date]) events[e.date] = [];
-                    events[e.date].push(e);
+                    if (!mergedEvents[e.date]) mergedEvents[e.date] = [];
+                    // 检查是否已存在（避免重复）
+                    const exists = mergedEvents[e.date].some(item => item.id === e.id);
+                    if (!exists) {
+                        mergedEvents[e.date].push(e);
+                    }
                 });
 
-                Object.keys(events).forEach(date => {
-                    events[date].sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
+                Object.keys(mergedEvents).forEach(date => {
+                    mergedEvents[date].sort((a, b) => (a.time || '00:00').localeCompare(b.time || '00:00'));
                 });
 
-                LocalCache.setAll(events);
+                LocalCache.setAll(mergedEvents);
             }
 
             async syncToCloud(dateStr) {
@@ -510,8 +518,9 @@
             nextMonth() { this.currentDate.setMonth(this.currentDate.getMonth()+1); this.render(); }
 
             today() {
-                this.currentDate = new Date();
-                this.selectedDate = this.formatDate(new Date());
+                const now = new Date();
+                this.currentDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                this.selectedDate = this.formatDate(now);
                 this.render();
                 eventManager.loadEventsForDate(this.selectedDate);
             }
@@ -870,6 +879,20 @@
 
         const todayStr = calendar.formatDate(new Date());
         calendar.selectDate(todayStr);
+
+        // 页面卸载前同步所有本地数据到云端
+        window.addEventListener('beforeunload', async (e) => {
+            if (authManager.user) {
+                const allEvents = LocalCache.getAll();
+                for (const dateStr of Object.keys(allEvents)) {
+                    try {
+                        await authManager.syncToCloud(dateStr);
+                    } catch (err) {
+                        console.error('同步失败:', err);
+                    }
+                }
+            }
+        });
 
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
