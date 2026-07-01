@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交互式日历 - Supabase版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        * { font-family: 'Inter', sans-serif; }
+        body { background: #0f172a; }
+        .glass {
+            background: rgba(255, 255, 255, 0.07);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+        .glass-strong {
+            background: rgba(35, 45, 65, 0.6);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .day-cell {
+            transition: all 0.2s ease;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .day-cell:hover {
+            background: rgba(99, 102, 241, 0.15);
+            transform: translateY(-2px);
+        }
+        .day-cell.active {
+            background: rgba(99, 102, 241, 0.22);
+            border-color: rgba(99, 102, 241, 0.5);
+        }
+        .day-cell.today {
+            background: rgba(16, 185, 129, 0.12);
+            border-color: rgba(16, 185, 129, 0.4);
+        }
+        .event-dot { box-shadow: 0 0 8px currentColor; }
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .slide-in { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .color-option { transition: transform 0.2s; }
+        .color-option:hover { transform: scale(1.2); }
+        .color-option.selected {
+            transform: scale(1.3);
+            box-shadow: 0 0 0 2px white, 0 0 0 4px currentColor;
+        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.3); }
+    </style>
+</head>
+<body class="text-slate-200 min-h-screen overflow-x-hidden">
+    <!-- 背景装饰 -->
+    <div class="fixed inset-0 overflow-hidden pointer-events-none">
+        <div class="absolute -top-40 -left-40 w-96 h-96 bg-indigo-600 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse"></div>
+        <div class="absolute -bottom-40 -right-40 w-96 h-96 bg-purple-600 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-pulse" style="animation-delay: 2s"></div>
+        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-pink-600 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-pulse" style="animation-delay: 4s"></div>
+    </div>
+
+    <div class="relative z-10 container mx-auto px-4 py-8 max-w-6xl">
+        <!-- 头部 -->
+        <header class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+            <div class="flex items-center gap-4">
+                <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+                    <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">日历</h1>
+                    <p class="text-slate-400 text-sm" id="currentFullDate">加载中...</p>
+                </div>
+            </div>
+
+            <!-- 用户状态 -->
+            <div id="userStatus" class="flex items-center gap-3">
+                <span class="text-slate-400 text-sm">未登录</span>
+                <button onclick="authManager.showLoginModal()" class="glass px-4 py-2 rounded-xl hover:bg-white/10 transition text-sm font-medium">
+                    登录 / 注册
+                </button>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 日历主体 -->
+            <div class="lg:col-span-2">
+                <div class="glass-strong rounded-3xl p-6 shadow-2xl">
+                    <!-- 月份导航 -->
+                    <div class="flex items-center justify-between mb-6">
+                        <button onclick="calendar.prevMonth()" class="p-2 hover:bg-white/10 rounded-lg transition">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                        </button>
+                        <span id="monthYear" class="px-4 font-semibold text-lg"></span>
+                        <button onclick="calendar.nextMonth()" class="p-2 hover:bg-white/10 rounded-lg transition">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                        </button>
+                    </div>
+
+                    <!-- 星期标题 -->
+                    <div class="grid grid-cols-7 gap-2 mb-4">
+                        <div class="text-center text-sm font-medium text-red-400 py-2">日</div>
+                        <div class="text-center text-sm font-medium text-slate-400 py-2">一</div>
+                        <div class="text-center text-sm font-medium text-slate-400 py-2">二</div>
+                        <div class="text-center text-sm font-medium text-slate-400 py-2">三</div>
+                        <div class="text-center text-sm font-medium text-slate-400 py-2">四</div>
+                        <div class="text-center text-sm font-medium text-slate-400 py-2">五</div>
+                        <div class="text-center text-sm font-medium text-slate-400 py-2">六</div>
+                    </div>
+
+                    <!-- 日期网格 -->
+                    <div id="calendarGrid" class="grid grid-cols-7 gap-2"></div>
+                </div>
+
+                <!-- 统计信息 -->
+                <div class="grid grid-cols-3 gap-4 mt-6">
+                    <div class="glass rounded-2xl p-4 text-center">
+                        <div class="text-2xl font-bold text-indigo-400" id="statTotalEvents">0</div>
+                        <div class="text-xs text-slate-500 mt-1">本月事件</div>
+                    </div>
+                    <div class="glass rounded-2xl p-4 text-center">
+                        <div class="text-2xl font-bold text-emerald-400" id="statTodayEvents">0</div>
+                        <div class="text-xs text-slate-500 mt-1">今日事件</div>
+                    </div>
+                    <div class="glass rounded-2xl p-4 text-center">
+                        <div class="text-2xl font-bold text-purple-400" id="statUpcoming">0</div>
+                        <div class="text-xs text-slate-500 mt-1">待办事项</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 侧边栏 -->
+            <div class="lg:col-span-1">
+                <div class="glass-strong rounded-3xl p-6 shadow-2xl h-full flex flex-col">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h2 class="text-xl font-bold" id="selectedDateTitle">选择日期</h2>
+                            <p class="text-sm text-slate-400" id="selectedDateSubtitle">点击日历查看详情</p>
+                        </div>
+                        <div class="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                            <svg class="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                        </div>
+                    </div>
+
+                    <div id="eventsList" class="flex-1 overflow-y-auto space-y-3 max-h-[500px]"></div>
+
+                    <button onclick="eventManager.openModal()" id="addEventBtn" class="mt-4 w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl font-medium hover:from-indigo-500 hover:to-purple-500 transition shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        添加事件
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 登录弹窗 -->
+    <div id="authModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="authManager.hideLoginModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="glass-strong rounded-3xl p-6 w-full max-w-md fade-in shadow-2xl border border-white/10">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-xl font-bold">登录 / 注册</h3>
+                    <button onclick="authManager.hideLoginModal()" class="p-2 hover:bg-white/10 rounded-lg transition">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+                <form id="authForm" onsubmit="authManager.handleAuth(event)">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-2">邮箱</label>
+                            <input type="email" id="authEmail" required class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-indigo-500 transition placeholder-slate-500" placeholder="your@email.com">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-2">密码</label>
+                            <input type="password" id="authPassword" required minlength="6" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-indigo-500 transition placeholder-slate-500" placeholder="至少6位">
+                        </div>
+                    </div>
+                    <div id="authError" class="text-red-400 text-sm mt-3 hidden"></div>
+                    <button type="submit" id="authSubmitBtn" class="mt-4 w-full py-3 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl font-medium hover:from-indigo-500 hover:to-purple-500 transition shadow-lg shadow-indigo-500/25">
+                        登录 / 自动注册
+                    </button>
+                    <p class="text-xs text-slate-500 mt-3 text-center">新用户自动注册，已有账号直接登录</p>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 事件编辑弹窗 -->
+    <div id="eventModal" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="eventManager.closeModal()"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="glass-strong rounded-3xl p-6 w-full max-w-md fade-in shadow-2xl border border-white/10">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 class="text-xl font-bold" id="modalTitle">添加事件</h3>
+                    <button onclick="eventManager.closeModal()" class="p-2 hover:bg-white/10 rounded-lg transition">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+
+                <form id="eventForm" onsubmit="eventManager.saveEvent(event)">
+                    <input type="hidden" id="eventId">
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-2">标题</label>
+                            <input type="text" id="eventTitle" required class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition placeholder-slate-500" placeholder="输入事件标题">
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-300 mb-2">时间</label>
+                                <input type="time" id="eventTime" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-indigo-500 transition">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-300 mb-2">标签颜色</label>
+                                <div class="flex gap-2 mt-2">
+                                    <button type="button" onclick="eventManager.selectColor('indigo')" class="color-option w-6 h-6 rounded-full bg-indigo-500" data-color="indigo"></button>
+                                    <button type="button" onclick="eventManager.selectColor('red')" class="color-option w-6 h-6 rounded-full bg-red-500" data-color="red"></button>
+                                    <button type="button" onclick="eventManager.selectColor('green')" class="color-option w-6 h-6 rounded-full bg-emerald-500" data-color="green"></button>
+                                    <button type="button" onclick="eventManager.selectColor('yellow')" class="color-option w-6 h-6 rounded-full bg-amber-500" data-color="yellow"></button>
+                                    <button type="button" onclick="eventManager.selectColor('purple')" class="color-option w-6 h-6 rounded-full bg-purple-500" data-color="purple"></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-2">描述</label>
+                            <textarea id="eventDesc" rows="3" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-indigo-500 transition resize-none placeholder-slate-500" placeholder="添加详细描述（可选）"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-3 mt-6">
+                        <button type="button" onclick="eventManager.deleteEvent()" id="deleteBtn" class="hidden px-4 py-3 bg-red-500/20 text-red-400 rounded-xl hover:bg-red-500/30 transition font-medium">
+                            删除
+                        </button>
+                        <button type="submit" class="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl font-medium hover:from-indigo-500 hover:to-purple-500 transition shadow-lg shadow-indigo-500/25">
+                            保存
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== Supabase 配置 ====================
+        // 【重要】替换为你自己的 Supabase 项目 URL 和 anon key
+        const SB_URL = 'https://tdfrokzslxwbtgmofrng.supabase.co';
+        const SB_KEY = 'sb_publishable_YVsD-A8R03beSgE5PXdDbg_csZb6-hR';
+
+        const sbClient = window.supabase.createClient(SB_URL, SB_KEY);
+
+        // ==================== 认证管理 ====================
+        class AuthManager {
+            constructor() {
+                this.user = null;
+                this.init();
+            }
+
+            async init() {
+                const { data: { session } } = await sbClient.auth.getSession();
+                if (session) {
+                    this.user = session.user;
+                    this.updateUI();
+                }
+
+                sbClient.auth.onAuthStateChange((event, session) => {
+                    this.user = session?.user || null;
+                    this.updateUI();
+                    if (this.user) {
+                        calendar.render();
+                        if (calendar.selectedDate) {
+                            eventManager.loadEventsForDate(calendar.selectedDate);
+                        }
+                    }
+                });
+            }
+
+            updateUI() {
+                const statusEl = document.getElementById('userStatus');
+                const addBtn = document.getElementById('addEventBtn');
+
+                if (this.user) {
+                    statusEl.innerHTML = `
+                        <span class="text-slate-400 text-sm truncate max-w-[150px]">${this.user.email}</span>
+                        <button onclick="authManager.logout()" class="glass px-4 py-2 rounded-xl hover:bg-white/10 transition text-sm font-medium text-red-400">
+                            退出
+                        </button>
+                    `;
+                    addBtn.disabled = false;
+                } else {
+                    statusEl.innerHTML = `
+                        <span class="text-slate-400 text-sm">未登录</span>
+                        <button onclick="authManager.showLoginModal()" class="glass px-4 py-2 rounded-xl hover:bg-white/10 transition text-sm font-medium">
+                            登录 / 注册
+                        </button>
+                    `;
+                    addBtn.disabled = true;
+                }
+            }
+
+            showLoginModal() {
+                document.getElementById('authModal').classList.remove('hidden');
+                document.getElementById('authError').classList.add('hidden');
+                document.getElementById('authForm').reset();
+            }
+
+            hideLoginModal() {
+                document.getElementById('authModal').classList.add('hidden');
+            }
+
+            async handleAuth(e) {
+                e.preventDefault();
+                const email = document.getElementById('authEmail').value;
+                const password = document.getElementById('authPassword').value;
+                const errorEl = document.getElementById('authError');
+                const btn = document.getElementById('authSubmitBtn');
+
+                btn.disabled = true;
+                btn.textContent = '处理中...';
+
+                let { data, error } = await sbClient.auth.signInWithPassword({ email, password });
+
+                if (error) {
+                    ({ data, error } = await sbClient.auth.signUp({ email, password }));
+                }
+
+                if (error) {
+                    errorEl.textContent = error.message;
+                    errorEl.classList.remove('hidden');
+                } else {
+                    this.hideLoginModal();
+                    errorEl.classList.add('hidden');
+                }
+
+                btn.disabled = false;
+                btn.textContent = '登录 / 自动注册';
+            }
+
+            async logout() {
+                await sbClient.auth.signOut();
+                calendar.render();
+                document.getElementById('eventsList').innerHTML = `
+                    <div class="text-center text-slate-500 py-12">
+                        <p>请先登录查看事件</p>
+                    </div>
+                `;
+            }
+        }
+
+        // ==================== 日历核心 ====================
+        class Calendar {
+            constructor() {
+                this.currentDate = new Date();
+                this.selectedDate = null;
+                this.today = new Date();
+                this.monthNames = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
+            }
+
+            init() {
+                this.render();
+                this.updateFullDate();
+            }
+
+            updateFullDate() {
+                const options = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
+                document.getElementById('currentFullDate').textContent = this.today.toLocaleDateString('zh-CN', options);
+            }
+
+            prevMonth() { this.currentDate.setMonth(this.currentDate.getMonth()-1); this.render(); }
+            nextMonth() { this.currentDate.setMonth(this.currentDate.getMonth()+1); this.render(); }
+
+            today() {
+                this.currentDate = new Date();
+                this.selectedDate = this.formatDate(new Date());
+                this.render();
+                eventManager.loadEventsForDate(this.selectedDate);
+            }
+
+            selectDate(dateStr) {
+                this.selectedDate = dateStr;
+                this.render();
+                eventManager.loadEventsForDate(dateStr);
+            }
+
+            formatDate(date) {
+                return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+            }
+
+            async getEventsForDate(dateStr) {
+                if (!authManager.user) return [];
+                const { data } = await sbClient
+                    .from('events')
+                    .select('*')
+                    .eq('user_id', authManager.user.id)
+                    .eq('date', dateStr);
+                return data || [];
+            }
+
+            async render() {
+                const year = this.currentDate.getFullYear();
+                const month = this.currentDate.getMonth();
+                document.getElementById('monthYear').textContent = `${year}年 ${this.monthNames[month]}`;
+
+                const firstDay = new Date(year, month, 1).getDay();
+                const daysInMonth = new Date(year, month+1, 0).getDate();
+                const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+                const grid = document.getElementById('calendarGrid');
+                grid.innerHTML = '';
+
+                for (let i = firstDay-1; i >= 0; i--) {
+                    grid.appendChild(this.createDayCell(daysInPrevMonth-i, true));
+                }
+
+                const eventsMap = new Map();
+                if (authManager.user) {
+                    const startDate = this.formatDate(new Date(year, month, 1));
+                    const endDate = this.formatDate(new Date(year, month+1, 0));
+                    const { data } = await sbClient
+                        .from('events')
+                        .select('date, color')
+                        .eq('user_id', authManager.user.id)
+                        .gte('date', startDate)
+                        .lte('date', endDate);
+
+                    (data || []).forEach(e => {
+                        if (!eventsMap.has(e.date)) eventsMap.set(e.date, new Set());
+                        eventsMap.get(e.date).add(e.color);
+                    });
+                }
+
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dateStr = this.formatDate(new Date(year, month, day));
+                    const isToday = this.formatDate(this.today) === dateStr;
+                    const isSelected = this.selectedDate === dateStr;
+                    const colors = eventsMap.get(dateStr);
+                    grid.appendChild(this.createDayCell(day, false, isToday, isSelected, dateStr, colors));
+                }
+
+                const remaining = 42 - (firstDay + daysInMonth);
+                for (let day = 1; day <= remaining; day++) {
+                    grid.appendChild(this.createDayCell(day, true));
+                }
+
+                this.updateStats();
+            }
+
+            createDayCell(day, isOtherMonth, isToday=false, isSelected=false, dateStr='', colors=null) {
+                const cell = document.createElement('div');
+                cell.className = `day-cell relative h-20 md:h-24 rounded-2xl p-2 cursor-pointer flex flex-col justify-between ${isOtherMonth ? 'opacity-40 bg-white/[0.04]' : ''}`;
+                if (isToday) cell.classList.add('today');
+                if (isSelected) cell.classList.add('active');
+                if (!isOtherMonth) cell.onclick = () => this.selectDate(dateStr);
+
+                const dayNum = document.createElement('span');
+                dayNum.className = `text-sm font-semibold ${isToday ? 'text-emerald-400' : 'text-white'}`;
+                dayNum.textContent = day;
+                cell.appendChild(dayNum);
+
+                if (!isOtherMonth && colors && colors.size > 0) {
+                    const dots = document.createElement('div');
+                    dots.className = 'flex gap-1 flex-wrap content-end';
+                    const colorMap = { 'indigo': 'bg-indigo-500', 'red': 'bg-red-500', 'green': 'bg-emerald-500', 'yellow': 'bg-amber-500', 'purple': 'bg-purple-500' };
+                    Array.from(colors).slice(0, 4).forEach(c => {
+                        const dot = document.createElement('div');
+                        dot.className = `w-2 h-2 rounded-full ${colorMap[c] || 'bg-indigo-500'} event-dot`;
+                        dots.appendChild(dot);
+                    });
+                    if (colors.size > 4) {
+                        const more = document.createElement('span');
+                        more.className = 'text-[10px] text-slate-500';
+                        more.textContent = `+${colors.size-4}`;
+                        dots.appendChild(more);
+                    }
+                    cell.appendChild(dots);
+                }
+                return cell;
+            }
+
+            async updateStats() {
+                if (!authManager.user) {
+                    document.getElementById('statTotalEvents').textContent = '0';
+                    document.getElementById('statTodayEvents').textContent = '0';
+                    document.getElementById('statUpcoming').textContent = '0';
+                    return;
+                }
+                const currentMonth = this.currentDate.getMonth();
+                const currentYear = this.currentDate.getFullYear();
+                const todayStr = this.formatDate(this.today);
+
+                const { data } = await sbClient
+                    .from('events')
+                    .select('date')
+                    .eq('user_id', authManager.user.id);
+
+                let monthEvents = 0, todayEvents = 0, upcoming = 0;
+                (data || []).forEach(e => {
+                    const d = new Date(e.date);
+                    if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) monthEvents++;
+                    if (e.date === todayStr) todayEvents++;
+                    if (e.date >= todayStr) upcoming++;
+                });
+
+                document.getElementById('statTotalEvents').textContent = monthEvents;
+                document.getElementById('statTodayEvents').textContent = todayEvents;
+                document.getElementById('statUpcoming').textContent = upcoming;
+            }
+        }
+
+        // ==================== 事件管理 ====================
+        class EventManager {
+            constructor() {
+                this.selectedColor = 'indigo';
+                this.currentEditingId = null;
+                this.currentDate = null;
+            }
+
+            async loadEventsForDate(dateStr) {
+                this.currentDate = dateStr;
+                const date = new Date(dateStr);
+                document.getElementById('selectedDateTitle').textContent = date.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' });
+                document.getElementById('selectedDateSubtitle').textContent = dateStr;
+
+                const list = document.getElementById('eventsList');
+
+                if (!authManager.user) {
+                    list.innerHTML = '<div class="text-center text-slate-500 py-12"><p>请先登录</p></div>';
+                    return;
+                }
+
+                const { data: events } = await sbClient
+                    .from('events')
+                    .select('*')
+                    .eq('user_id', authManager.user.id)
+                    .eq('date', dateStr)
+                    .order('time');
+
+                if (!events || events.length === 0) {
+                    list.innerHTML = `
+                        <div class="text-center text-slate-500 py-12 slide-in">
+                            <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                            </svg>
+                            <p>暂无事件</p>
+                            <p class="text-sm mt-1">点击 + 添加新事件</p>
+                        </div>`;
+                } else {
+                    list.innerHTML = '';
+                    events.forEach((event, index) => {
+                        const colorMap = {
+                            'indigo': 'border-l-indigo-500 bg-indigo-500/10',
+                            'red': 'border-l-red-500 bg-red-500/10',
+                            'green': 'border-l-emerald-500 bg-emerald-500/10',
+                            'yellow': 'border-l-amber-500 bg-amber-500/10',
+                            'purple': 'border-l-purple-500 bg-purple-500/10'
+                        };
+                        const item = document.createElement('div');
+                        item.className = `slide-in p-4 rounded-xl border-l-4 ${colorMap[event.color] || colorMap['indigo']} cursor-pointer hover:bg-white/5 transition group`;
+                        item.style.animationDelay = `${index * 0.05}s`;
+                        item.onclick = () => this.editEvent(event);
+                        item.innerHTML = `
+                            <div class="flex justify-between items-start">
+                                <div class="flex-1">
+                                    <h4 class="font-semibold text-white group-hover:text-indigo-300 transition">${event.title}</h4>
+                                    ${event.time ? `<span class="text-xs text-slate-400 mt-1 inline-block">${event.time}</span>` : ''}
+                                    ${event.desc ? `<p class="text-sm text-slate-400 mt-2 line-clamp-2">${event.desc}</p>` : ''}
+                                </div>
+                                <svg class="w-4 h-4 text-slate-600 group-hover:text-slate-400 transition opacity-0 group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
+                                </svg>
+                            </div>`;
+                        list.appendChild(item);
+                    });
+                }
+                calendar.updateStats();
+            }
+
+            openModal(event = null) {
+                if (!authManager.user) { authManager.showLoginModal(); return; }
+                if (!this.currentDate) return;
+
+                const modal = document.getElementById('eventModal');
+                const deleteBtn = document.getElementById('deleteBtn');
+
+                document.querySelectorAll('.color-option').forEach(btn => {
+                    btn.classList.remove('selected');
+                    if (btn.dataset.color === 'indigo') btn.classList.add('selected');
+                });
+                this.selectedColor = 'indigo';
+
+                if (event) {
+                    document.getElementById('modalTitle').textContent = '编辑事件';
+                    document.getElementById('eventId').value = event.id;
+                    document.getElementById('eventTitle').value = event.title;
+                    document.getElementById('eventTime').value = event.time || '';
+                    document.getElementById('eventDesc').value = event.desc || '';
+                    this.selectColor(event.color || 'indigo');
+                    this.currentEditingId = event.id;
+                    deleteBtn.classList.remove('hidden');
+                } else {
+                    document.getElementById('modalTitle').textContent = '添加事件';
+                    document.getElementById('eventForm').reset();
+                    document.getElementById('eventId').value = '';
+                    this.currentEditingId = null;
+                    deleteBtn.classList.add('hidden');
+                }
+
+                modal.classList.remove('hidden');
+                setTimeout(() => document.getElementById('eventTitle').focus(), 100);
+            }
+
+            closeModal() { document.getElementById('eventModal').classList.add('hidden'); this.currentEditingId = null; }
+            selectColor(color) {
+                this.selectedColor = color;
+                document.querySelectorAll('.color-option').forEach(btn => {
+                    btn.classList.remove('selected');
+                    if (btn.dataset.color === color) btn.classList.add('selected');
+                });
+            }
+            editEvent(event) { this.openModal(event); }
+
+            async saveEvent(e) {
+                e.preventDefault();
+                if (!authManager.user) return;
+
+                const title = document.getElementById('eventTitle').value.trim();
+                const time = document.getElementById('eventTime').value;
+                const desc = document.getElementById('eventDesc').value.trim();
+                if (!title) return;
+
+                const eventData = {
+                    user_id: authManager.user.id,
+                    date: this.currentDate,
+                    title,
+                    time,
+                    desc,
+                    color: this.selectedColor
+                };
+
+                if (this.currentEditingId) {
+                    await sbClient.from('events').update(eventData).eq('id', this.currentEditingId);
+                } else {
+                    await sbClient.from('events').insert(eventData);
+                }
+
+                this.closeModal();
+                this.loadEventsForDate(this.currentDate);
+                calendar.render();
+            }
+
+            async deleteEvent() {
+                if (!this.currentEditingId || !this.currentDate) return;
+                if (!confirm('确定要删除这个事件吗？')) return;
+
+                await sbClient.from('events').delete().eq('id', this.currentEditingId);
+                this.closeModal();
+                this.loadEventsForDate(this.currentDate);
+                calendar.render();
+            }
+        }
+
+        // ==================== 初始化 ====================
+        const authManager = new AuthManager();
+        const calendar = new Calendar();
+        const eventManager = new EventManager();
+
+        calendar.init();
+
+        const todayStr = calendar.formatDate(new Date());
+        calendar.selectDate(todayStr);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                eventManager.closeModal();
+                authManager.hideLoginModal();
+            }
+            if (!document.getElementById('eventModal').classList.contains('hidden')) return;
+            if (!document.getElementById('authModal').classList.contains('hidden')) return;
+            if (e.key === 'ArrowLeft') calendar.prevMonth();
+            if (e.key === 'ArrowRight') calendar.nextMonth();
+        });
+    </script>
+</body>
+</html>
